@@ -55,6 +55,106 @@ async function main() {
     console.log(`SampleCodeLanguage 常量可用: Node.js=${SampleCodeLanguage.NODEJS}`);
     console.log('✅ 所有枚举/常量均已正常导入并可点号访问');
 
+    logSection('【离线演示】典型错误处理（无需连平台，可直接复制到项目）');
+    console.log('构造 5 种典型 SDK 错误，演示如何按错误码 + 平台原始码分支处理：\n');
+
+    const mockErrors: Array<{ case: string; err: DataElementSdkError }> = [
+      {
+        case: '场景 A：取消已处理的订单（平台返回 ORDER_ALREADY_PROCESSED）',
+        err: new DataElementSdkError(ErrorCode.ORDER_ALREADY_PROCESSED, '该订购申请已审批完成，无法取消', {
+          platformCode: 50003,
+          requestId: 'REQ-ORD-20240815-001',
+          httpStatus: 200
+        })
+      },
+      {
+        case: '场景 B：查询不存在的数据产品（404 body 里返回平台原始码 40402）',
+        err: new DataElementSdkError(ErrorCode.PRODUCT_NOT_FOUND, '数据产品不存在，请核对产品ID', {
+          platformCode: 40402,
+          requestId: 'REQ-PROD-20240815-002',
+          httpStatus: 404,
+          details: { productId: 'PROD_NOT_EXIST' }
+        })
+      },
+      {
+        case: '场景 C：订购用途说明填写太短，触发 SDK 本地表单校验（validationErrors）',
+        err: new DataElementSdkError(ErrorCode.PARAM_INVALID, '订购表单参数校验失败', {
+          platformCode: 40001,
+          requestId: 'REQ-ORDER-20240815-003',
+          validationErrors: [
+            { field: 'dataPurpose', message: '用途说明长度不能少于 10 个字，当前填写 6 个字', code: 'LEN_TOO_SHORT' },
+            { field: 'applicant.phone', message: '手机号格式不合法，请输入 11 位手机号码', code: 'FORMAT' }
+          ]
+        })
+      },
+      {
+        case: '场景 D：下载凭证时授权已暂停（平台抛 AUTHORIZATION_SUSPENDED）',
+        err: new DataElementSdkError(ErrorCode.AUTHORIZATION_SUSPENDED, '该授权因合规问题已被管理员暂停，请联系运营', {
+          platformCode: 50005,
+          requestId: 'REQ-CRED-20240815-004',
+          httpStatus: 200,
+          details: { authorizationId: 'AUTH_XXXX' }
+        })
+      },
+      {
+        case: '场景 E：调用某接口额度已耗尽（平台返回 QUOTA_EXCEEDED，附剩余刷新时间）',
+        err: new DataElementSdkError(ErrorCode.QUOTA_EXCEEDED, '本月调用额度已耗尽，请申请扩容或升级套餐', {
+          platformCode: 42901,
+          requestId: 'REQ-API-20240815-005',
+          httpStatus: 429,
+          details: { interfaceId: 'IF_001', refreshAt: '2024-09-01 00:00:00' }
+        })
+      }
+    ];
+
+    for (const mock of mockErrors) {
+      console.log(`▶ ${mock.case}`);
+      const e = mock.err;
+      if (isSdkError(e)) {
+        console.log(`   SDK code: ${e.code} (平台原始码: ${e.platformCode ?? '—'})  requestId: ${e.requestId ?? '—'}`);
+        if (e.httpStatus) console.log(`   httpStatus: ${e.httpStatus}  message: ${e.message}`);
+
+        if (e.code === ErrorCode.ORDER_ALREADY_PROCESSED ||
+            e.code === ErrorCode.ORDER_CANNOT_CANCEL) {
+          console.log(`   ✅ 页面动作: 提示「${e.message}」，隐藏「取消申请」按钮，引导联系审批人\n`);
+          continue;
+        }
+
+        if (e.code === ErrorCode.PRODUCT_NOT_FOUND ||
+            e.code === ErrorCode.ORDER_NOT_FOUND ||
+            e.code === ErrorCode.AUTHORIZATION_NOT_FOUND) {
+          console.log(`   ✅ 页面动作: 展示 404 状态页，提示「资源可能已被删除或 ID 有误」，返回列表\n`);
+          continue;
+        }
+
+        if (e.code === ErrorCode.PARAM_INVALID && e.validationErrors && e.validationErrors.length > 0) {
+          console.log(`   ✅ 页面动作: 在表单中给每个字段标红显示：`);
+          e.validationErrors.forEach(ve => console.log(`      · ${ve.field}: ${ve.message}`));
+          console.log();
+          continue;
+        }
+
+        if (e.code === ErrorCode.CREDENTIAL_NOT_FOUND ||
+            e.code === ErrorCode.AUTHORIZATION_SUSPENDED ||
+            e.code === ErrorCode.AUTHORIZATION_EXPIRED) {
+          console.log(`   ✅ 页面动作: 禁用「下载凭证」按钮，在按钮下方提示，到期或暂停场景引导续费/申诉\n`);
+          continue;
+        }
+
+        if (e.code === ErrorCode.QUOTA_EXCEEDED || e.code === ErrorCode.RATE_LIMITED) {
+          console.log(`   ✅ 页面动作: 顶部展示告警条「本月额度已用尽」，提供「申请扩容」快捷入口`);
+          if (e.details && (e.details as { refreshAt?: string }).refreshAt) {
+            console.log(`      自动刷新时间: ${(e.details as { refreshAt: string }).refreshAt}`);
+          }
+          console.log();
+          continue;
+        }
+
+        console.log(`   ✅ 兜底处理: 弹 toast 显示错误信息 + requestId，联系技术支持时附 requestId\n`);
+      }
+    }
+    console.log('✅ 离线错误处理演示完成 → 以上 catch 分支可直接复制到接入方业务代码');
+
     logSection('【便捷方法】产品检索 - 页面表单一键查询');
 
     const pageFormResult = await sdk.products.searchFromPageForm({
@@ -198,6 +298,9 @@ async function main() {
     logSection('授权聚合看板（一次性拿到首页所有数据）');
     const dashboard = await sdk.authorizations.getUsageDashboard({ daysWithin: 30 });
     console.log(`生成时间: ${dashboard.generatedAt}`);
+    if (dashboard.filter) {
+      console.log(`当前看板使用方过滤: ${JSON.stringify(dashboard.filter)}`);
+    }
     console.log(`统计摘要:`);
     console.log(`  - 总授权数: ${dashboard.summary.totalAuthorizations}`);
     console.log(`  - 生效中:   ${dashboard.summary.activeCount}`);
@@ -218,6 +321,17 @@ async function main() {
         console.log(`    额度: ${a.quotaUsed}/${a.quotaTotal} ${a.quotaUnit} (${a.quotaUsagePercentage.toFixed(1)}%)`);
       }
     });
+
+    logSection('【数据隔离】看板按使用方过滤（张三 vs 李四）');
+    const [dZhang, dLi] = await Promise.all([
+      sdk.authorizations.getUsageDashboard({ userId: 'u_10086', userName: '张三', daysWithin: 30 }),
+      sdk.authorizations.getUsageDashboard({ userId: 'u_20001', userName: '李四', department: '市场营销部', daysWithin: 30 })
+    ]);
+    console.log(`张三的看板: 生效中授权 ${dZhang.summary.activeCount} 条，到期提醒 ${dZhang.expiringReminders.length} 条`);
+    console.log(`  filter 字段: ${JSON.stringify(dZhang.filter)}`);
+    console.log(`李四的看板: 生效中授权 ${dLi.summary.activeCount} 条，到期提醒 ${dLi.expiringReminders.length} 条`);
+    console.log(`  filter 字段: ${JSON.stringify(dLi.filter)}`);
+    console.log(`✅ 两者 filter 字段不同，请求各带各的 userId，服务端按使用方分别返回数据`);
 
     let demoAuthId: string | null = null;
     if (dashboard.effectiveAuthorizations.length > 0) {

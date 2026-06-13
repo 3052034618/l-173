@@ -67,18 +67,35 @@ export class AuthorizationClient {
     return resp.data;
   }
 
-  public async getStatistics(): Promise<AuthorizationStatistics> {
-    const resp = await this.http.get<AuthorizationStatistics>('/api/v1/authorizations/statistics');
+  public async getStatistics(filter?: {
+    applicantUserId?: string;
+    applicantUserName?: string;
+    applicantDepartment?: string;
+  }): Promise<AuthorizationStatistics> {
+    const params: Record<string, unknown> = {};
+    if (filter?.applicantUserId) params.applicantUserId = filter.applicantUserId;
+    if (filter?.applicantUserName) params.applicantUserName = filter.applicantUserName;
+    if (filter?.applicantDepartment) params.applicantDepartment = filter.applicantDepartment;
+    const resp = await this.http.get<AuthorizationStatistics>('/api/v1/authorizations/statistics', params);
     return resp.data;
   }
 
-  public async getExpiryReminders(daysWithin: number = 30): Promise<ExpiryReminder[]> {
+  public async getExpiryReminders(
+    daysWithin: number = 30,
+    filter?: {
+      applicantUserId?: string;
+      applicantUserName?: string;
+      applicantDepartment?: string;
+    }
+  ): Promise<ExpiryReminder[]> {
     if (daysWithin <= 0) {
       throw createError(ErrorCode.PARAM_INVALID, 'daysWithin 必须为正整数');
     }
-    const resp = await this.http.get<ExpiryReminder[]>('/api/v1/authorizations/expiry-reminders', {
-      daysWithin
-    });
+    const params: Record<string, unknown> = { daysWithin };
+    if (filter?.applicantUserId) params.applicantUserId = filter.applicantUserId;
+    if (filter?.applicantUserName) params.applicantUserName = filter.applicantUserName;
+    if (filter?.applicantDepartment) params.applicantDepartment = filter.applicantDepartment;
+    const resp = await this.http.get<ExpiryReminder[]>('/api/v1/authorizations/expiry-reminders', params);
     return resp.data.map(r => this.withSeverity(r));
   }
 
@@ -171,12 +188,17 @@ export class AuthorizationClient {
 
     const resolved = this.resolveFilePath(savePath, result.fileName);
     const targetDir = resolved.directory;
+    let directoryCreated = false;
 
     try {
       if (!fs.existsSync(targetDir)) {
         fs.mkdirSync(targetDir, { recursive: true });
+        directoryCreated = true;
       }
     } catch (e) {
+      if (directoryCreated) {
+        try { fs.rmSync(targetDir, { recursive: true, force: true }); } catch { /* ignore */ }
+      }
       throw createError(
         ErrorCode.BUSINESS_ERROR,
         `创建保存目录失败: ${targetDir}`,
@@ -187,6 +209,7 @@ export class AuthorizationClient {
     try {
       fs.writeFileSync(resolved.filePath, result.fileContent, 'utf8');
     } catch (e) {
+      try { fs.unlinkSync(resolved.filePath); } catch { /* ignore */ }
       throw createError(
         ErrorCode.BUSINESS_ERROR,
         `写入凭证文件失败: ${resolved.filePath}`,
@@ -194,17 +217,27 @@ export class AuthorizationClient {
       );
     }
 
-    const stat = fs.statSync(resolved.filePath);
-    return {
-      filePath: resolved.filePath,
-      fileName: result.fileName,
-      fileSize: stat.size
-    };
+    try {
+      const stat = fs.statSync(resolved.filePath);
+      return {
+        filePath: resolved.filePath,
+        fileName: result.fileName,
+        fileSize: stat.size
+      };
+    } catch (e) {
+      throw createError(
+        ErrorCode.BUSINESS_ERROR,
+        `读取文件大小失败: ${resolved.filePath}`,
+        { details: (e as Error).message }
+      );
+    }
   }
 
   public async getUsageDashboard(
     options: {
       userId?: string;
+      userName?: string;
+      department?: string;
       daysWithin?: number;
       includeAlerts?: boolean;
     } = {}
@@ -212,11 +245,19 @@ export class AuthorizationClient {
     const daysWithin = options.daysWithin ?? 30;
     const includeAlerts = options.includeAlerts ?? true;
     const generatedAt = new Date().toISOString();
+    const filterOpts = {
+      applicantUserId: options.userId,
+      applicantUserName: options.userName,
+      applicantDepartment: options.department
+    };
 
     const [authList, reminders, stats] = await Promise.all([
-      this.listAuthorizations({ expiresWithinDays: daysWithin }, { pageSize: 200 }),
-      this.getExpiryReminders(daysWithin),
-      this.getStatistics()
+      this.listAuthorizations(
+        { expiresWithinDays: daysWithin, ...filterOpts },
+        { pageSize: 200 }
+      ),
+      this.getExpiryReminders(daysWithin, filterOpts),
+      this.getStatistics(filterOpts)
     ]);
 
     const effectiveAuths = authList.list;
@@ -279,6 +320,7 @@ export class AuthorizationClient {
     }
 
     return {
+      filter: filterOpts,
       effectiveAuthorizations: dashboardAuths,
       expiringReminders: reminders,
       summary: {
@@ -332,6 +374,9 @@ export class AuthorizationClient {
     if (filter.expiresWithinDays) params.expiresWithinDays = filter.expiresWithinDays;
     if (filter.effectiveFrom) params.effectiveFrom = filter.effectiveFrom;
     if (filter.effectiveTo) params.effectiveTo = filter.effectiveTo;
+    if (filter.applicantUserId) params.applicantUserId = filter.applicantUserId;
+    if (filter.applicantUserName) params.applicantUserName = filter.applicantUserName;
+    if (filter.applicantDepartment) params.applicantDepartment = filter.applicantDepartment;
     return params;
   }
 

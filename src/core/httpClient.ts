@@ -172,10 +172,26 @@ export class HttpClient {
   }
 
   private handleApiResponse<T>(res: HttpResponse<T>, req: InternalHttpRequest): ApiResponse<T> {
-    const requestId = res.headers['x-request-id'] || res.headers['X-Request-ID'];
+    const headerRequestId = res.headers['x-request-id'] || res.headers['X-Request-ID'];
+    const apiResp = res.body as unknown as ApiResponse<T>;
+    if (apiResp && typeof apiResp === 'object' && 'code' in apiResp) {
+      if (apiResp.code !== ErrorCode.SUCCESS) {
+        throw createError(apiResp.code as ErrorCode, apiResp.message, {
+          requestId: apiResp.requestId || headerRequestId,
+          httpStatus: res.statusCode,
+          platformCode: apiResp.code,
+          details: (apiResp as unknown as { data?: unknown }).data
+        });
+      }
+      return {
+        ...apiResp,
+        requestId: apiResp.requestId || headerRequestId || apiResp.requestId || ''
+      };
+    }
+
     if (res.statusCode >= 500) {
       throw createError(ErrorCode.BUSINESS_ERROR, `服务端错误: HTTP ${res.statusCode}`, {
-        requestId,
+        requestId: headerRequestId,
         httpStatus: res.statusCode,
         details: res.rawBody
       });
@@ -183,27 +199,15 @@ export class HttpClient {
 
     if (res.statusCode === 404) {
       throw createError(ErrorCode.RESOURCE_NOT_FOUND, '请求的资源不存在', {
-        requestId,
+        requestId: headerRequestId,
         httpStatus: res.statusCode,
         details: { url: req.url }
       });
     }
 
-    const apiResp = res.body as unknown as ApiResponse<T>;
-    if (apiResp && typeof apiResp === 'object' && 'code' in apiResp) {
-      if (apiResp.code !== ErrorCode.SUCCESS) {
-        throw createError(apiResp.code as ErrorCode, apiResp.message, {
-          requestId: apiResp.requestId || requestId,
-          httpStatus: res.statusCode,
-          details: (apiResp as unknown as { data?: unknown }).data
-        });
-      }
-      return apiResp;
-    }
-
     if (res.statusCode >= 400) {
       throw createError(ErrorCode.SDK_HTTP_ERROR, `HTTP ${res.statusCode}`, {
-        requestId,
+        requestId: headerRequestId,
         httpStatus: res.statusCode,
         details: res.rawBody
       });
@@ -213,7 +217,7 @@ export class HttpClient {
       code: ErrorCode.SUCCESS,
       message: 'success',
       data: res.body,
-      requestId: requestId || '',
+      requestId: headerRequestId || '',
       timestamp: Date.now()
     };
   }
@@ -276,10 +280,51 @@ export class HttpClient {
     const timeout = options?.timeout || this.config.timeout;
     try {
       const res = await this.doRequest<string>(req, timeout, options);
-      const disposition = res.headers['content-disposition'] || '';
+
+      const headerRequestId = res.headers['x-request-id'] || res.headers['X-Request-ID'];
+      let parsed: ApiResponse<unknown> | null = null;
+      try {
+        parsed = JSON.parse(res.rawBody) as ApiResponse<unknown>;
+      } catch {
+        parsed = null;
+      }
+
+      if (parsed && typeof parsed === 'object' && 'code' in parsed && parsed.code !== ErrorCode.SUCCESS) {
+        throw createError(parsed.code as ErrorCode, parsed.message, {
+          requestId: parsed.requestId || headerRequestId,
+          httpStatus: res.statusCode,
+          platformCode: parsed.code,
+          details: (parsed as { data?: unknown }).data
+        });
+      }
+
+      if (res.statusCode >= 400 && !parsed) {
+        if (res.statusCode === 404) {
+          throw createError(ErrorCode.RESOURCE_NOT_FOUND, '凭证不存在', {
+            requestId: headerRequestId,
+            httpStatus: res.statusCode,
+            details: { url: req.url }
+          });
+        }
+        throw createError(ErrorCode.BUSINESS_ERROR, `凭证下载失败: HTTP ${res.statusCode}`, {
+          requestId: headerRequestId,
+          httpStatus: res.statusCode,
+          details: res.rawBody
+        });
+      }
+
+      const content = typeof res.body === 'string' ? res.body : res.rawBody;
+      if (parsed && parsed.code === ErrorCode.SUCCESS && typeof parsed.data === 'string') {
+        return {
+          contentType: res.headers['content-type'] || 'application/octet-stream',
+          content: parsed.data,
+          headers: res.headers
+        };
+      }
+
       return {
         contentType: res.headers['content-type'] || 'application/octet-stream',
-        content: typeof res.body === 'string' ? res.body : res.rawBody,
+        content,
         headers: res.headers
       };
     } catch (err) {

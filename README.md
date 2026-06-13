@@ -590,12 +590,29 @@ try {
 
 ### 6.3 首页聚合看板：一次性拉取所有概览数据
 
-给业务系统首页或个人中心提供聚合接口，一次调用返回：授权汇总、生效中授权（含剩余额度与可用接口数）、到期提醒、告警数。
+给业务系统首页或个人中心提供聚合接口，一次调用返回：授权汇总、生效中授权（含剩余额度与可用接口数、到期提醒、告警数。
+
+> 🛡️ **使用方数据隔离：`getUsageDashboard` 支持传 `userId / userName / department` 作为过滤条件，内部把使用方维度分别传给 listAuthorizations、getStatistics、getExpiryReminders 三个 API 的参数，服务端按使用方返回数据，不同使用方看到各自首页看板互不混在一起。返回的 `dashboard.filter` 字段回显本次调用的过滤条件，便于页面显示"当前查看人校验和调试时核对。
 
 ```typescript
-const dashboard = await sdk.authorizations.getUsageDashboard({
-  daysWithin: 30,      // 到期提醒窗口（天）
-  includeAlerts: true  // 是否统计额度告警数量
+// 张三登录后的首页：传 userId 保证只看到张三自己的授权
+const dashboardForZhangsan = await sdk.authorizations.getUsageDashboard({
+  userId: 'u_10086',
+  userName: '张三',
+  daysWithin: 30,
+  includeAlerts: true
+});
+// dashboardForZhangsan.filter → { applicantUserId: 'u_10086', applicantUserName: '张三' }
+// 李四的看板（不同 userId 得到的 activeCount / totalInterfaceCount 完全独立
+const dashboardForLisi = await sdk.authorizations.getUsageDashboard({
+  userId: 'u_20001',
+  department: '市场营销部'
+});
+
+// 不传 userId 时拉取当前调用方可查看的所有授权（管理员或全局视角
+const globalDashboard = await sdk.authorizations.getUsageDashboard({
+  daysWithin: 30,
+  includeAlerts: true
 });
 
 // dashboard.summary.totalAuthorizations / activeCount / expiringCount / expiredCount / suspendedCount
@@ -608,7 +625,7 @@ const dashboard = await sdk.authorizations.getUsageDashboard({
 //   · quotaTotal / quotaUsed / quotaRemaining / quotaUnit / quotaUsagePercentage
 
 // dashboard.expiringReminders[]            // 到期提醒（已按严重等级填充 severity）
-// dashboard.generatedAt                    // 本次看板生成时间
+// dashboard.generatedAt                // 本次看板生成时间
 ```
 
 ---
@@ -644,20 +661,73 @@ try {
   await sdk.products.getProductDetail('NOT_EXIST');
 } catch (err) {
   if (isSdkError(err)) {
-    console.error(`错误码: ${err.code}`);                // ErrorCode 枚举
+    console.error(`错误码: ${err.code}`);                // SDK 标准错误码（ErrorCode 枚举）
+    console.error(`平台原始码: ${err.platformCode}`);    // 平台返回的原始业务码（如 50003、40402）
     console.error(`错误信息: ${err.message}`);
-    console.error(`请求ID: ${err.requestId}`);           // 用于排查
+    console.error(`请求ID: ${err.requestId}`);             // 平台链路追踪 ID，排查问题必备
     console.error(`HTTP码: ${err.httpStatus}`);
     console.error(`校验细节: ${err.validationErrors}`);  // 参数不合法时
 
-    // 基于错误码做分支处理
-    if (err.code === ErrorCode.PRODUCT_NOT_FOUND) { ... }
+    // 推荐基于「平台原始码分支（更贴近平台侧的分支：
+    switch (err.platformCode) {
+      case 50003: /* 订单已处理 */ break;
+      case 40402: /* 产品不存在 */ break;
+    }
+    // 或者按 SDK 标准错误码分支：
+    if (err.code === ErrorCode.PRODUCT_NOT_FOUND) {
+      console.log(`requestId: ${err.requestId}，请拿着这个找平台运营确认是否被下架`);
+    }
+    if (err.code === ErrorCode.ORDER_ALREADY_PROCESSED) { /* 隐藏取消按钮 */ }
     if (err.code === ErrorCode.ORDER_CANNOT_CANCEL) { ... }
     if (err.code === ErrorCode.QUOTA_EXCEEDED) { ... }
     if (err.code === ErrorCode.AUTH_EXPIRED) { ... }
     if (err.code === ErrorCode.SDK_TIMEOUT) { /* 重试或放大超时 */ }
   } else {
     // 非 SDK 预期错误（如语法错误）
+  }
+}
+```
+
+> 🔑 **关键约定**：无论 HTTP 状态码是 200、404 还是 500，只要响应体符合平台标准格式 `{ code, message, requestId, data }` 且 `code != 0`，SDK **优先按 body 里的业务码抛出错误**，并把平台原始码挂在 `platformCode` 上，供接入方做更细粒度的分支（取消已处理订单、查询不存在的产品等）。只有当响应体无法解析为标准 JSON 时，才会退化为按 HTTP 状态码映射。
+
+### 凭证下载 · 三种失败场景验收（**失败时不创建任何目录或文件**）：
+
+```typescript
+import * as fs from 'fs';
+const targetDir = './tmp-credentials';
+const targetFile = './credentials/specific-cred.json';
+
+// 场景 1：传不存在的授权 ID → 抛出 AUTHORIZATION_NOT_FOUND → 目录不会被创建
+try {
+  await sdk.authorizations.downloadCredentialToFile(
+    { authorizationId: 'AUTH_NOT_EXIST_XXXX', format: CredentialFormat.JSON },
+    targetDir
+  );
+} catch (e) {
+  if (isSdkError(e) && e.code === ErrorCode.AUTHORIZATION_NOT_FOUND) {
+    console.log(`✅ 正确抛错，目录未创建: ${!fs.existsSync(targetDir)}`);
+  }
+}
+
+// 场景 2：授权存在但凭证尚未生成 → 抛出 CREDENTIAL_NOT_FOUND → 文件不会被创建
+try {
+  await sdk.authorizations.downloadCredentialToFile(
+    { authorizationId: 'AUTH_PENDING', format: CredentialFormat.JSON },
+    targetFile
+  );
+} catch (e) {
+  if (isSdkError(e) && e.code === ErrorCode.CREDENTIAL_NOT_FOUND) {
+    console.log(`✅ 凭证未生成时不写文件: ${!fs.existsSync(targetFile)}`);
+  }
+}
+
+// 场景 3：服务端返回 5xx 或业务错误 → 抛出 BUSINESS_ERROR → 不创建任何路径
+try {
+  await sdk.authorizations.downloadCredentialToFile({ authorizationId: 'AUTH_001' }, targetDir);
+} catch (e) {
+  if (isSdkError(e)) {
+    console.log(`[${e.code}] ${e.message}，requestId=${e.requestId}`);
+    console.log(`✅ 服务端失败不留下任何残留: ${!fs.existsSync(targetDir)}`);
   }
 }
 ```

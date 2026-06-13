@@ -5,6 +5,7 @@ export type { SdkError, ValidationError };
 
 export class DataElementSdkError extends Error implements SdkError {
   public readonly code: ErrorCode;
+  public readonly platformCode?: number | string;
   public readonly requestId?: string;
   public readonly httpStatus?: number;
   public readonly details?: unknown;
@@ -14,6 +15,7 @@ export class DataElementSdkError extends Error implements SdkError {
     code: ErrorCode,
     message?: string,
     options: {
+      platformCode?: number | string;
       requestId?: string;
       httpStatus?: number;
       details?: unknown;
@@ -25,6 +27,7 @@ export class DataElementSdkError extends Error implements SdkError {
     super(finalMessage);
     this.name = 'DataElementSdkError';
     this.code = code;
+    this.platformCode = options.platformCode;
     this.requestId = options.requestId;
     this.httpStatus = options.httpStatus;
     this.details = options.details;
@@ -39,6 +42,7 @@ export class DataElementSdkError extends Error implements SdkError {
     return {
       name: this.name,
       code: this.code,
+      platformCode: this.platformCode,
       message: this.message,
       requestId: this.requestId,
       httpStatus: this.httpStatus,
@@ -50,6 +54,7 @@ export class DataElementSdkError extends Error implements SdkError {
 
   public toString(): string {
     const parts: string[] = [`[${this.name}] code=${this.code}`, `message=${this.message}`];
+    if (this.platformCode !== undefined) parts.push(`platformCode=${this.platformCode}`);
     if (this.requestId) parts.push(`requestId=${this.requestId}`);
     if (this.httpStatus) parts.push(`httpStatus=${this.httpStatus}`);
     return parts.join(', ');
@@ -60,9 +65,11 @@ export function createError(
   code: ErrorCode,
   message?: string,
   options: {
+    platformCode?: number | string;
     requestId?: string;
     httpStatus?: number;
     details?: unknown;
+    validationErrors?: ValidationError[];
     cause?: Error;
   } = {}
 ): DataElementSdkError {
@@ -73,6 +80,7 @@ export function throwError(
   code: ErrorCode,
   message?: string,
   options: {
+    platformCode?: number | string;
     requestId?: string;
     httpStatus?: number;
     details?: unknown;

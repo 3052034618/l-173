@@ -60,9 +60,11 @@ export const ErrorMessage: Record<ErrorCode, string> = {
 
 export interface SdkError extends Error {
   code: ErrorCode;
+  platformCode?: number | string;
   requestId?: string;
   httpStatus?: number;
   details?: unknown;
+  validationErrors?: ValidationError[];
 }
 
 export interface ValidationError {

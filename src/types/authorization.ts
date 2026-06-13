@@ -122,6 +122,9 @@ export interface AuthorizationFilterParams {
   expiresWithinDays?: number;
   effectiveFrom?: string;
   effectiveTo?: string;
+  applicantUserId?: string;
+  applicantUserName?: string;
+  applicantDepartment?: string;
 }
 
 export interface CredentialDownloadRequest {
@@ -151,6 +154,11 @@ export interface AuthorizationStatistics {
 }
 
 export interface UsageDashboardOverview {
+  filter?: {
+    applicantUserId?: string;
+    applicantUserName?: string;
+    applicantDepartment?: string;
+  };
   effectiveAuthorizations: Array<{
     authorizationId: string;
     productId: string;
