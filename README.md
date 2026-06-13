@@ -16,6 +16,8 @@
   - [三、授权状态查询](#三授权状态查询)
   - [四、用量与额度查询](#四用量与额度查询)
   - [五、凭证下载](#五凭证下载)
+  - [六、页面便捷方法与看板](#六页面便捷方法与看板)
+- [运行示例](#运行示例)
 - [错误处理](#错误处理)
 - [配置项参考](#配置项参考)
 - [类型定义索引](#类型定义索引)
@@ -452,6 +454,183 @@ const saved = await sdk.authorizations.downloadCredentialToFile(
 | `ini` | 传统应用配置 | `[sdk]\napp_key = ...` |
 | `pdf` | 合规存档、审批附件 | 含水印与签名的正式凭证 |
 
+> ⚠️ **写入安全性**：`downloadCredentialToFile` 采用「先完整下载并校验内容 → 再写文件」的两阶段流程。服务端返回 4xx/5xx、凭证为空、授权过期/暂停、目录创建失败、文件写入失败等任何异常**均不会留下残留或空文件**，调用方只需按 `isSdkError(err)` 分支处理即可。
+
+```typescript
+import { isSdkError, ErrorCode, CredentialFormat, SampleCodeLanguage } from 'data-element-circulation-sdk';
+
+// 用法 1：传目录，按默认文件名自动写入（推荐批量归档）
+try {
+  const saved = await sdk.authorizations.downloadCredentialToFile(
+    {
+      authorizationId: 'AUTH_001',
+      format: CredentialFormat.JSON,
+      includeSampleCode: true,
+      sampleCodeLanguages: [SampleCodeLanguage.NODEJS, SampleCodeLanguage.PYTHON]
+    },
+    './credentials'   // 目录不存在会自动创建
+  );
+  console.log(`已保存到 ${saved.filePath}, ${saved.fileSize} 字节`);
+} catch (err) {
+  if (isSdkError(err)) {
+    switch (err.code) {
+      case ErrorCode.AUTHORIZATION_NOT_FOUND:
+        console.log('授权不存在，请确认 ID');
+        break;
+      case ErrorCode.CREDENTIAL_NOT_FOUND:
+        console.log('凭证尚未生成，通常是授权仍待生效，请稍后再试');
+        break;
+      case ErrorCode.AUTHORIZATION_SUSPENDED:
+      case ErrorCode.AUTHORIZATION_EXPIRED:
+        console.log('授权已暂停或过期，无法下载');
+        break;
+      default:
+        console.log(`下载失败 [${err.code}]: ${err.message}`);
+    }
+  }
+}
+
+// 用法 2：传完整文件路径（精确控制文件名）
+const saved = await sdk.authorizations.downloadCredentialToFile(
+  { authorizationId: 'AUTH_001', format: CredentialFormat.ENV, includeSampleCode: false },
+  './config/.env.data-element'
+);
+```
+
+---
+
+## 六、页面便捷方法与看板
+
+### 6.1 产品检索：页面表单一键查询
+
+面向内部页面的筛选表单，直接把前端输入塞进 `searchFromPageForm` 即可，SDK 会把逗号分隔的标签字符串、价格区间、分页排序等统一转换为底层参数。
+
+```typescript
+import { Industry, ProductStatus } from 'data-element-circulation-sdk';
+
+const page = await sdk.products.searchFromPageForm({
+  keyword: '企业工商',                       // 搜索框
+  industry: Industry.FINANCE,                // 行业下拉（或直接传 'finance' 字符串）
+  tags: '基础信息, 注册资本',                // 标签文本框（英文/中文逗号或空格分隔，自动拆分）
+  tagLogic: 'or',
+  minPrice: 0,                               // 价格区间
+  maxPrice: 10000,
+  status: ProductStatus.PUBLISHED,
+  pageNum: 1,
+  pageSize: 20,
+  sortBy: 'orderCount',                      // orderCount | minPrice | rating | publishedAt | viewCount
+  sortOrder: 'desc'
+});
+```
+
+对应接口类型：`ProductSearchForm`。
+
+### 6.2 订购申请：直接提交页面表单
+
+`submitFromPageForm` 内置字段级校验，失败时通过 `validationErrors` 返回每个字段的中文提示，页面可以直接在输入框下方显示：
+
+```typescript
+import {
+  UrgencyLevel, ScenarioType, DataHandlingMethod,
+  isSdkError, ErrorCode
+} from 'data-element-circulation-sdk';
+
+try {
+  const order = await sdk.orders.submitFromPageForm({
+    productId: 'PROD_001',
+    pricePlanId: 'PLAN_001',
+    quantity: 1,
+    applicant: {
+      userId: 'u_10086',
+      userName: '张三',
+      department: '风险管理部',
+      phone: '138-1234-5678',
+      email: 'zhangsan@company.com',
+      companyName: '某某科技有限公司',
+      unifiedSocialCreditCode: '91310000MA1K3XXXX'
+    },
+    scenarios: [
+      {
+        scenarioType: ScenarioType.RISK_CONTROL,
+        scenarioName: '贷前准入风控',
+        description: '在信贷业务贷前审批环节，核验申请企业工商注册信息及经营状态……',
+        systemName: '智能风控平台',
+        systemUrl: 'https://risk.company.com',
+        dataHandlingMethod: DataHandlingMethod.API,
+        storageLocation: '内部私有云（华北节点）',
+        retentionPeriod: 30
+      }
+    ],
+    dataPurpose: '用于小微企业信贷业务贷前准入环节的企业主体信息核验，提升风险识别准确性……',
+    isInternalUse: true,
+    urgencyLevel: UrgencyLevel.URGENT,
+    expectedStartDate: '2024-01-01',
+    expectedEndDate: '2024-12-31'
+  });
+  console.log(`申请已提交，订单号 ${order.orderNo}`);
+} catch (err) {
+  if (isSdkError(err) && err.code === ErrorCode.PARAM_INVALID) {
+    // 页面可遍历 validationErrors 给对应输入框展示错误
+    for (const ve of err.validationErrors!) {
+      console.log(`${ve.field}: ${ve.message}`);
+    }
+  }
+}
+```
+
+已内置的校验规则：
+- 申请人 `userId / userName / department` 为必填
+- 手机号、邮箱格式校验（存在时校验）
+- 场景 `scenarioType / description` 必填，描述 ≥ 10 字
+- 数据保留天数 0~3650
+- `dataPurpose` 用途说明 ≥ 10 字
+- 订购数量为正整数
+- 开始日期 ≤ 结束日期
+- `isInternalUse` 必须显式声明
+
+### 6.3 首页聚合看板：一次性拉取所有概览数据
+
+给业务系统首页或个人中心提供聚合接口，一次调用返回：授权汇总、生效中授权（含剩余额度与可用接口数）、到期提醒、告警数。
+
+```typescript
+const dashboard = await sdk.authorizations.getUsageDashboard({
+  daysWithin: 30,      // 到期提醒窗口（天）
+  includeAlerts: true  // 是否统计额度告警数量
+});
+
+// dashboard.summary.totalAuthorizations / activeCount / expiringCount / expiredCount / suspendedCount
+// dashboard.summary.totalInterfaceCount    // 可用接口总数（各授权已启用接口之和）
+// dashboard.summary.alertsCount            // 额度告警 + 高优先级到期提醒合计
+
+// dashboard.effectiveAuthorizations[]      // 每个授权一行，方便直接渲染列表
+//   · authorizationId / productName / statusName / daysRemaining
+//   · enabledInterfaceCount                // 已启用接口数
+//   · quotaTotal / quotaUsed / quotaRemaining / quotaUnit / quotaUsagePercentage
+
+// dashboard.expiringReminders[]            // 到期提醒（已按严重等级填充 severity）
+// dashboard.generatedAt                    // 本次看板生成时间
+```
+
+---
+
+## 运行示例
+
+```bash
+# 方式一：仅做类型检查（不发请求，适合接入前验证常量导入是否正常）
+npm run example:check
+
+# 方式二：运行完整示例（会按 baseUrl 发请求，可先用默认的 mock baseUrl 观察日志结构）
+npm run example
+
+# 方式三：带上真实环境变量
+$env:DE_BASE_URL="https://data-circulation.example.com"
+$env:DE_APP_KEY="your_app_key"
+$env:DE_APP_SECRET="your_app_secret"
+npm run example
+```
+
+> 🎯 示例特点：所有行业、订单状态、紧急度、凭证格式等常量均通过 `Industry`、`OrderStatus`、`UrgencyLevel`、`CredentialFormat`、`SampleCodeLanguage` 等枚举点号访问，无需手写字符串，完全避免拼写错误；并覆盖了产品检索、订购申请、授权看板、凭证下载两种保存方式、凭证下载错误处理等完整接入场景。
+
 ---
 
 ## 错误处理
@@ -533,9 +712,12 @@ sdk.updateConfig({
 | 能力域 | 核心类型 |
 |---|---|
 | 通用 | `PaginationResult`, `PageRequest`, `ApiResponse<T>` |
-| 产品 | `ProductSummary`, `ProductDetail`, `ProductFilterParams`, `PricePlan`, `ProductInterface`, `Industry`, `CategoryTreeNode` |
-| 订购 | `CreateOrderRequest`, `OrderDetail`, `OrderStatus`, `OrderApplicant`, `UsageScenario`, `ApprovalNode`, `CancelOrderRequest` |
-| 授权 | `AuthorizationDetail`, `AuthorizationStatus`, `AuthorizationCredential`, `ExpiryReminder`, `CredentialDownloadRequest`, `CredentialDownloadResult`, `AuthorizedInterface` |
+| 产品 | `ProductSummary`, `ProductDetail`, `ProductFilterParams`, `ProductSearchForm`, `PricePlan`, `ProductInterface`, `CategoryTreeNode` |
+| 产品枚举 | `Industry`, `ProductStatus`, `PriceUnit` (+ 对应 `*Map` 中文映射) |
+| 订购 | `CreateOrderRequest`, `SubmitOrderFormData`, `OrderDetail`, `OrderApplicant`, `UsageScenario`, `ApprovalNode`, `CancelOrderRequest` |
+| 订购枚举 | `OrderStatus`, `UrgencyLevel`, `ScenarioType`, `DataHandlingMethod` (+ 对应 `*Map`) |
+| 授权 | `AuthorizationDetail`, `AuthorizationCredential`, `ExpiryReminder`, `CredentialDownloadRequest`, `CredentialDownloadResult`, `AuthorizedInterface`, `UsageDashboardOverview` |
+| 授权枚举 | `AuthorizationStatus`, `CredentialFormat`, `SampleCodeLanguage` (+ 对应 `*Map`) |
 | 用量 | `UsageQuota`, `UsageStatistics`, `DailyUsageRecord`, `InterfaceUsage`, `RateLimitInfo`, `QuotaAlert` |
 | 错误 | `ErrorCode`, `ErrorMessage`, `SdkError`, `ValidationError` |
 | 配置 | `SdkConfig`, `RequestOptions` |

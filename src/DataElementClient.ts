@@ -20,8 +20,11 @@ export class DataElementClient {
     this.httpClient = new HttpClient(this.configManager);
     this.products = new ProductClient(this.httpClient);
     this.orders = new OrderClient(this.httpClient);
-    this.authorizations = new AuthorizationClient(this.httpClient);
     this.usages = new UsageClient(this.httpClient);
+    this.authorizations = new AuthorizationClient(
+      this.httpClient,
+      (id: string) => this.usages.getUsageQuota(id)
+    );
   }
 
   public updateConfig(patch: Partial<SdkConfig>): void {

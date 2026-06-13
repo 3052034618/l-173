@@ -1,19 +1,36 @@
-export type AuthorizationStatus =
-  | 'active'
-  | 'pending'
-  | 'expiring'
-  | 'expired'
-  | 'suspended'
-  | 'revoked';
+export enum AuthorizationStatus {
+  ACTIVE = 'active',
+  PENDING = 'pending',
+  EXPIRING = 'expiring',
+  EXPIRED = 'expired',
+  SUSPENDED = 'suspended',
+  REVOKED = 'revoked'
+}
 
 export const AuthorizationStatusMap: Record<AuthorizationStatus, string> = {
-  active: '已生效',
-  pending: '待生效',
-  expiring: '即将到期',
-  expired: '已过期',
-  suspended: '已暂停',
-  revoked: '已撤销'
+  [AuthorizationStatus.ACTIVE]: '已生效',
+  [AuthorizationStatus.PENDING]: '待生效',
+  [AuthorizationStatus.EXPIRING]: '即将到期',
+  [AuthorizationStatus.EXPIRED]: '已过期',
+  [AuthorizationStatus.SUSPENDED]: '已暂停',
+  [AuthorizationStatus.REVOKED]: '已撤销'
 };
+
+export enum CredentialFormat {
+  JSON = 'json',
+  YAML = 'yaml',
+  INI = 'ini',
+  ENV = 'env',
+  PDF = 'pdf'
+}
+
+export enum SampleCodeLanguage {
+  NODEJS = 'nodejs',
+  PYTHON = 'python',
+  JAVA = 'java',
+  GO = 'go',
+  CSHARP = 'csharp'
+}
 
 export interface AuthorizationCredential {
   id: string;
@@ -36,7 +53,7 @@ export interface AuthorizationDetail {
   productName: string;
   pricePlanId: string;
   pricePlanName: string;
-  status: AuthorizationStatus;
+  status: AuthorizationStatus | string;
   statusName: string;
   quantity: number;
   effectiveAt: string;
@@ -99,7 +116,7 @@ export interface ExpiryReminder {
 }
 
 export interface AuthorizationFilterParams {
-  status?: AuthorizationStatus | AuthorizationStatus[];
+  status?: AuthorizationStatus | AuthorizationStatus[] | string | string[];
   productId?: string;
   keyword?: string;
   expiresWithinDays?: number;
@@ -110,9 +127,9 @@ export interface AuthorizationFilterParams {
 export interface CredentialDownloadRequest {
   authorizationId: string;
   credentialId?: string;
-  format?: 'json' | 'yaml' | 'ini' | 'env' | 'pdf';
+  format?: CredentialFormat | string;
   includeSampleCode?: boolean;
-  sampleCodeLanguages?: ('nodejs' | 'python' | 'java' | 'go' | 'csharp')[];
+  sampleCodeLanguages?: (SampleCodeLanguage | string)[];
   fileName?: string;
 }
 
@@ -131,4 +148,33 @@ export interface AuthorizationStatistics {
   expiring: number;
   expired: number;
   suspended: number;
+}
+
+export interface UsageDashboardOverview {
+  effectiveAuthorizations: Array<{
+    authorizationId: string;
+    productId: string;
+    productName: string;
+    status: AuthorizationStatus | string;
+    statusName: string;
+    expiresAt: string;
+    daysRemaining: number;
+    enabledInterfaceCount: number;
+    quotaTotal: number;
+    quotaUsed: number;
+    quotaRemaining: number;
+    quotaUnit: string;
+    quotaUsagePercentage: number;
+  }>;
+  expiringReminders: ExpiryReminder[];
+  summary: {
+    totalAuthorizations: number;
+    activeCount: number;
+    expiringCount: number;
+    expiredCount: number;
+    suspendedCount: number;
+    totalInterfaceCount: number;
+    alertsCount: number;
+  };
+  generatedAt: string;
 }

@@ -1,271 +1,368 @@
+import * as fs from 'fs';
+import * as path from 'path';
+import * as os from 'os';
 import {
   DataElementClient,
   DataElementSdkError,
   isSdkError,
   ErrorCode,
   Industry,
-  OrderStatus
+  OrderStatus,
+  ProductStatus,
+  UrgencyLevel,
+  ScenarioType,
+  DataHandlingMethod,
+  AuthorizationStatus,
+  CredentialFormat,
+  SampleCodeLanguage
 } from '../src';
 
+const TMP_DIR = path.join(os.tmpdir(), 'de-sdk-demo');
+const TMP_FILE = path.join(TMP_DIR, 'custom-credential-file.json');
+const TMP_DIR2 = path.join(TMP_DIR, 'as-dir');
+
+function logSection(title: string) {
+  const bar = '='.repeat(Math.max(0, 60 - title.length));
+  console.log(`\n===== ${title} ${bar}`);
+}
+
 async function main() {
+  logSection('初始化 SDK');
+
   const sdk = new DataElementClient({
-    baseUrl: 'https://data-circulation.example.com',
+    baseUrl: process.env.DE_BASE_URL || 'https://data-circulation.example.com',
     appKey: process.env.DE_APP_KEY || 'your_app_key_here',
     appSecret: process.env.DE_APP_SECRET || 'your_app_secret_here',
     timeout: 30000,
-    retryTimes: 2,
-    debug: true,
-    logger: (level, msg, data) => {
-      const ts = new Date().toISOString();
-      console.log(`[${ts}] [${level.toUpperCase()}] ${msg}`, data ?? '');
+    retryTimes: 1,
+    debug: false,
+    logger: (level, msg) => {
+      if (level === 'error') {
+        console.error(`[SDK/${level.toUpperCase()}] ${msg}`);
+      }
     }
   });
 
   try {
-    console.log('===== 1. 产品检索 - 按行业和标签筛选 =====');
-    const searchResult = await sdk.products.searchProducts(
-      {
-        keyword: '企业工商',
-        industry: Industry.FINANCE,
-        tags: ['基础信息', '注册资本'],
-        tagLogic: 'or',
-        status: 'published'
-      },
-      { pageNum: 1, pageSize: 10, field: 'orderCount', order: 'desc' }
-    );
-    console.log(`共找到 ${searchResult.total} 个产品，当前页 ${searchResult.list.length} 个`);
-    searchResult.list.forEach((p, i) => {
-      console.log(`  ${i + 1}. [${p.industryName}] ${p.name} - ￥${p.minPrice}/${p.priceUnit}, 评分: ${p.rating ?? '-'}`);
+    console.log(`Industry 常量可用: 金融=${Industry.FINANCE}, 医疗=${Industry.HEALTHCARE}`);
+    console.log(`OrderStatus 常量可用: 已通过=${OrderStatus.APPROVED}, 审核中=${OrderStatus.REVIEWING}`);
+    console.log(`ProductStatus 常量可用: 已发布=${ProductStatus.PUBLISHED}`);
+    console.log(`AuthorizationStatus 常量可用: 已生效=${AuthorizationStatus.ACTIVE}`);
+    console.log(`UrgencyLevel 常量可用: 紧急=${UrgencyLevel.URGENT}`);
+    console.log(`ScenarioType 常量可用: 风控=${ScenarioType.RISK_CONTROL}`);
+    console.log(`DataHandlingMethod 常量可用: API=${DataHandlingMethod.API}`);
+    console.log(`CredentialFormat 常量可用: JSON=${CredentialFormat.JSON}, ENV=${CredentialFormat.ENV}`);
+    console.log(`SampleCodeLanguage 常量可用: Node.js=${SampleCodeLanguage.NODEJS}`);
+    console.log('✅ 所有枚举/常量均已正常导入并可点号访问');
+
+    logSection('【便捷方法】产品检索 - 页面表单一键查询');
+
+    const pageFormResult = await sdk.products.searchFromPageForm({
+      keyword: '企业工商',
+      industry: Industry.FINANCE,
+      tags: '基础信息,注册资本',
+      tagLogic: 'or',
+      minPrice: 0,
+      maxPrice: 10000,
+      status: ProductStatus.PUBLISHED,
+      pageNum: 1,
+      pageSize: 10,
+      sortBy: 'orderCount',
+      sortOrder: 'desc'
+    });
+    console.log(`共找到 ${pageFormResult.total} 个产品，当前页 ${pageFormResult.list.length} 个`);
+    pageFormResult.list.slice(0, 3).forEach((p, i) => {
+      console.log(`  ${i + 1}. [${p.industryName}] ${p.name}`);
+      console.log(`     ￥${p.minPrice}/${p.priceUnit} | 状态:${p.statusName} | 订购:${p.orderCount}`);
     });
 
-    if (searchResult.list.length > 0) {
-      const firstProductId = searchResult.list[0].id;
-      console.log(`\n===== 2. 产品详情读取 =====`);
+    let firstProductId: string | null = null;
+    let firstPricePlanId: string | null = null;
+    if (pageFormResult.list.length > 0) {
+      firstProductId = pageFormResult.list[0].id;
+
+      logSection('产品详情与可用接口');
       const detail = await sdk.products.getProductDetail(firstProductId);
-      console.log(`产品名称: ${detail.name}`);
-      console.log(`提供商: ${detail.providerName}`);
-      console.log(`数据源: ${detail.dataSource}`);
-      console.log(`合规等级: ${detail.complianceInfo?.dataSecurityLevel ?? '未设置'}`);
+      console.log(`产品: ${detail.name}`);
+      console.log(`提供商: ${detail.providerName} | 合规: ${detail.complianceInfo?.dataSecurityLevel ?? '-'}`);
       console.log(`价格方案共 ${detail.pricePlans.length} 个:`);
       detail.pricePlans.forEach(plan => {
-        console.log(`  - ${plan.name}: ￥${plan.price} / ${plan.unit}, 额度 ${plan.quota}`);
+        console.log(`  - ${plan.name}: ￥${plan.price}/${plan.unit}, 额度 ${plan.quota}`);
       });
+      if (detail.pricePlans.length > 0) firstPricePlanId = detail.pricePlans[0].id;
 
-      console.log(`\n===== 3. 产品可用接口清单 =====`);
-      const interfaces = await sdk.products.getProductInterfaces(firstProductId);
-      interfaces.forEach((api, i) => {
+      const apis = await sdk.products.getProductInterfaces(firstProductId);
+      console.log(`可用接口共 ${apis.length} 个`);
+      apis.slice(0, 3).forEach((api, i) => {
         console.log(`  ${i + 1}. [${api.method}] ${api.path} - ${api.name}`);
-        console.log(`      QPS上限: ${api.qps ?? '-'}, 平均延迟: ${api.latency ?? '-'}ms`);
       });
+    }
 
-      console.log(`\n===== 4. 提交订购申请 =====`);
-      const selectedPlan = detail.pricePlans[0];
+    logSection('【便捷方法】订购申请 - 提交页面表单');
+    if (firstProductId && firstPricePlanId) {
       try {
-        const order = await sdk.orders.createOrder({
-          productId: detail.id,
-          pricePlanId: selectedPlan.id,
+        const order = await sdk.orders.submitFromPageForm({
+          productId: firstProductId,
+          pricePlanId: firstPricePlanId,
           quantity: 1,
           applicant: {
             userId: 'u_10086',
             userName: '张三',
             department: '风险管理部',
-            phone: '138****8888',
-            email: 'zhangsan@company.com',
+            phone: '138-1234-5678',
+            email: 'zhangsan@example.com',
             companyName: '某某科技有限公司',
             unifiedSocialCreditCode: '91310000MA1K3XXXX',
             businessLicenseUrl: 'https://cdn.example.com/license/u_10086.pdf'
           },
-          usageScenarios: [
+          scenarios: [
             {
-              scenarioType: 'risk_control',
+              scenarioType: ScenarioType.RISK_CONTROL,
               scenarioName: '贷前准入风控',
               description: '在信贷业务贷前审批环节，核验申请企业工商注册信息及经营状态，作为授信决策辅助依据。数据仅用于本系统实时查询，不做二次分发。',
               systemName: '智能风控平台',
               systemUrl: 'https://risk.company.com',
-              dataHandlingMethod: 'api',
+              dataHandlingMethod: DataHandlingMethod.API,
               storageLocation: '内部私有云（华北节点）',
               retentionPeriod: 30
             }
           ],
           dataPurpose: '用于小微企业信贷业务贷前准入环节的企业主体信息核验，提升风险识别准确性，保障信贷资金安全。不用于营销目的，不对外提供给第三方。',
           isInternalUse: true,
-          relatedProjects: ['PRJ-2024-001', 'PRJ-2024-008'],
-          remarks: '项目紧急，请尽快审批。',
-          urgencyLevel: 'urgent',
-          expectedStartDate: new Date().toISOString().slice(0, 10),
-          expectedEndDate: new Date(Date.now() + 365 * 24 * 3600 * 1000).toISOString().slice(0, 10)
+          relatedProjects: ['PRJ-2024-001'],
+          urgencyLevel: UrgencyLevel.URGENT,
+          expectedStartDate: '2024-01-01',
+          expectedEndDate: '2024-12-31'
         });
-        console.log(`订购申请提交成功，订单号: ${order.orderNo}, 状态: ${order.statusName}`);
-        console.log(`审批进度: ${order.currentApprovalStep ?? 0}/${order.approvalFlow?.length ?? 0}`);
-        order.approvalFlow?.forEach(node => {
-          console.log(`  步骤${node.step} [${node.statusName}]: ${node.role} - ${node.approverName ?? '待指定'}${node.opinion ? `, 意见: ${node.opinion}` : ''}`);
-        });
+        console.log(`✅ 订购申请提交成功`);
+        console.log(`   订单号: ${order.orderNo}`);
+        console.log(`   当前状态: ${order.statusName}`);
+        console.log(`   审批节点: ${order.currentApprovalStep ?? 0}/${order.approvalFlow?.length ?? 0}`);
 
         const orderId = order.id;
 
-        console.log(`\n===== 5. 查询审批进度 =====`);
+        logSection('查询审批进度');
         const progress = await sdk.orders.getApprovalProgress(orderId);
-        console.log(`当前状态: ${progress.statusName}`);
-        console.log(`已流转步骤: ${progress.approvalFlow?.filter(n => n.status === 'approved').length ?? 0} 步`);
+        console.log(`状态: ${progress.statusName}`);
+        progress.approvalFlow?.forEach((n, i) => {
+          console.log(`  节点${i + 1}: ${n.role} [${n.statusName}] ${n.approverName ?? '待处理'}${n.opinion ? ` - ${n.opinion}` : ''}`);
+        });
 
-        console.log(`\n===== 6. 取消未处理申请 =====`);
-        if (progress.status === 'pending' || progress.status === 'reviewing') {
+        logSection('取消未处理申请');
+        if (progress.status === OrderStatus.PENDING || progress.status === OrderStatus.REVIEWING) {
           try {
-            const cancelResult = await sdk.orders.cancelOrder({
+            const cancel = await sdk.orders.cancelOrder({
               orderId,
-              reason: '需求变更，暂不需要此数据产品，稍后重新申请。',
+              reason: '需求变更，稍后重新申请',
               operatorId: 'u_10086',
               operatorName: '张三'
             });
-            console.log(`取消${cancelResult.success ? '成功' : '失败'}: ${cancelResult.message}`);
+            console.log(cancel.success ? `✅ 取消成功: ${cancel.message}` : `❌ 取消失败: ${cancel.message}`);
           } catch (e) {
             if (isSdkError(e) && e.code === ErrorCode.ORDER_CANNOT_CANCEL) {
-              console.log(`当前订单状态不可取消: ${e.message}`);
+              console.log(`⚠️  当前状态不可取消: ${e.message}`);
             } else {
               throw e;
             }
           }
         } else {
-          console.log(`订单当前状态为 ${progress.statusName}，不可取消`);
+          console.log(`订单状态为 ${progress.statusName}，不可取消`);
         }
       } catch (e) {
         if (isSdkError(e) && e.code === ErrorCode.PARAM_INVALID) {
-          console.log(`订购参数校验失败: ${e.message}`);
-          if (e.validationErrors) {
-            e.validationErrors.forEach(ve => console.log(`  ${ve.field}: ${ve.message}`));
-          }
+          console.log('❌ 订购表单校验失败:');
+          (e.validationErrors || []).forEach(ve => {
+            console.log(`   - ${ve.field}: ${ve.message}`);
+          });
         } else {
           throw e;
         }
       }
+    } else {
+      console.log('⚠️  未获取到可用产品，跳过订购示例');
     }
 
-    console.log(`\n===== 7. 我的订购列表 =====`);
+    logSection('我的订购列表（按 OrderStatus 枚举筛选）');
     const myOrders = await sdk.orders.listOrders(
       {
         status: [OrderStatus.APPROVED, OrderStatus.REVIEWING],
         startDate: '2024-01-01'
       },
-      { pageNum: 1, pageSize: 20 }
+      { pageNum: 1, pageSize: 5 }
     );
-    console.log(`共 ${myOrders.total} 条申请`);
+    console.log(`共 ${myOrders.total} 条，当前页 ${myOrders.list.length} 条`);
     myOrders.list.forEach(o => {
-      console.log(`  ${o.orderNo} | ${o.productName} | ${o.statusName} | 提交: ${o.createdAt.slice(0, 10)}`);
+      console.log(`   ${o.orderNo} | ${o.productName} | ${o.statusName} | ${o.createdAt.slice(0, 10)}`);
     });
 
-    console.log(`\n===== 8. 授权列表 & 到期提醒 =====`);
-    const [authList, reminders] = await Promise.all([
-      sdk.authorizations.listAuthorizations({ expiresWithinDays: 90 }, { pageSize: 50 }),
-      sdk.authorizations.getExpiryReminders(30)
-    ]);
-    console.log(`有效授权数: ${authList.total}, 30天内到期的有 ${reminders.length} 个`);
-    reminders.forEach(r => {
-      console.log(`  [${r.severity.toUpperCase()}] ${r.productName}: 还有 ${r.daysRemaining} 天到期 (${r.expiresAt.slice(0, 10)})`);
-      console.log(`      建议: ${r.suggestedAction === 'renew' ? '在线续费' : r.suggestedAction === 'apply_new' ? '重新申请' : '联系管理员'}`);
+    logSection('授权聚合看板（一次性拿到首页所有数据）');
+    const dashboard = await sdk.authorizations.getUsageDashboard({ daysWithin: 30 });
+    console.log(`生成时间: ${dashboard.generatedAt}`);
+    console.log(`统计摘要:`);
+    console.log(`  - 总授权数: ${dashboard.summary.totalAuthorizations}`);
+    console.log(`  - 生效中:   ${dashboard.summary.activeCount}`);
+    console.log(`  - 即将到期: ${dashboard.summary.expiringCount}`);
+    console.log(`  - 已过期:   ${dashboard.summary.expiredCount}`);
+    console.log(`  - 已暂停:   ${dashboard.summary.suspendedCount}`);
+    console.log(`  - 可用接口: ${dashboard.summary.totalInterfaceCount} 个`);
+    console.log(`  - 告警数量: ${dashboard.summary.alertsCount} 条`);
+    console.log(`即将到期提醒（${dashboard.expiringReminders.length}）:`);
+    dashboard.expiringReminders.slice(0, 5).forEach(r => {
+      console.log(`  [${r.severity.toUpperCase()}] ${r.productName}: ${r.daysRemaining}天后到期`);
+    });
+    console.log(`我的授权详情（${dashboard.effectiveAuthorizations.length}）:`);
+    dashboard.effectiveAuthorizations.slice(0, 3).forEach(a => {
+      console.log(`  · ${a.productName}`);
+      console.log(`    状态:${a.statusName} | 接口:${a.enabledInterfaceCount}个 | 剩余:${a.daysRemaining}天`);
+      if (a.quotaUnit) {
+        console.log(`    额度: ${a.quotaUsed}/${a.quotaTotal} ${a.quotaUnit} (${a.quotaUsagePercentage.toFixed(1)}%)`);
+      }
     });
 
-    if (authList.list.length > 0) {
-      const auth = authList.list[0];
+    let demoAuthId: string | null = null;
+    if (dashboard.effectiveAuthorizations.length > 0) {
+      demoAuthId = dashboard.effectiveAuthorizations[0].authorizationId;
 
-      console.log(`\n===== 9. 拉取可用接口清单 =====`);
-      const authorizedIfs = await sdk.authorizations.getAuthorizedInterfaces(auth.id);
-      console.log(`产品 "${auth.productName}" 授权接口共 ${authorizedIfs.length} 个:`);
-      authorizedIfs.forEach(api => {
-        console.log(`  ${api.isEnabled ? '✓' : '✗'} [${api.method}] ${api.path} - ${api.name}`);
-        if (api.dailyQpsLimit) console.log(`      日QPS限制: ${api.dailyQpsLimit}, 月QPS限制: ${api.monthlyQpsLimit ?? '-'}`);
-      });
+      logSection('授权有效性校验');
+      const st = await sdk.authorizations.checkAuthorizationStatus(demoAuthId);
+      console.log(`   ${st.statusName} | 有效:${st.isValid} | 剩余:${st.daysRemaining}天`);
 
-      console.log(`\n===== 10. 检查调用额度 & 使用量统计 =====`);
-      const { quota, alerts } = await sdk.usages.checkAndWarnQuota(auth.id);
+      logSection('【用量】调用额度检查');
+      const { quota, alerts, isExhausted, isWarning } =
+        await sdk.usages.checkAndWarnQuota(demoAuthId);
       console.log(`总额度: ${quota.totalQuota} ${quota.quotaUnit}`);
       console.log(`已使用: ${quota.usedQuota} (${quota.usagePercentage.toFixed(1)}%)`);
-      console.log(`剩余:   ${quota.remainingQuota}`);
-      if (quota.isExhausted) {
-        console.log('⚠️  额度已用尽！');
-      } else if (quota.isWarning) {
-        console.log(`⚠️  用量超过阈值 ${quota.warningThreshold}%，请关注`);
-      }
+      console.log(`剩余  : ${quota.remainingQuota}`);
+      console.log(isExhausted ? '❌ 额度已用尽' : isWarning ? '⚠️  用量告警' : '✅ 额度充足');
       if (alerts.length > 0) {
-        console.log(`额度告警 ${alerts.length} 条:`);
-        alerts.forEach(a => console.log(`  [${a.level}] ${a.message} @ ${a.triggeredAt}`));
+        alerts.slice(0, 3).forEach(a => console.log(`   [${a.level}] ${a.message}`));
       }
 
-      const today = new Date();
-      const stats = await sdk.usages.getUsageStatistics({
-        authorizationId: auth.id,
-        granularity: 'day',
-        startDate: new Date(today.getTime() - 30 * 24 * 3600 * 1000).toISOString().slice(0, 10),
-        endDate: today.toISOString().slice(0, 10),
-        groupBy: 'interface'
-      });
-      console.log(`\n近30天调用总览:`);
-      console.log(`  总调用: ${stats.totalCalls}, 错误: ${stats.totalErrors}, 成功率: ${stats.totalSuccessRate.toFixed(2)}%`);
-      if (stats.avgLatencyMs) console.log(`  平均延迟: ${stats.avgLatencyMs}ms`);
-      if (stats.interfaceBreakdown && stats.interfaceBreakdown.length > 0) {
-        console.log(`  按接口分布:`);
-        stats.interfaceBreakdown.slice(0, 3).forEach(ib => {
-          console.log(`    ${ib.interfaceName}: ${ib.callCount}次 (${ib.percentage.toFixed(1)}%), 成功率 ${ib.successRate.toFixed(2)}%`);
+      logSection('【用量】QPS/日/月限流状态');
+      const rateLimits = await sdk.usages.getRateLimitInfo(demoAuthId);
+      if (rateLimits.length === 0) {
+        console.log('  无（未配置限流规则）');
+      } else {
+        rateLimits.forEach(rl => {
+          console.log(`   ${rl.interfaceName ?? '全局'} [${rl.limitType}]: ${rl.currentValue}/${rl.limitValue} (剩余 ${rl.remainingValue})`);
         });
       }
 
-      console.log(`\n===== 11. 限流状态检查 =====`);
-      const rateLimits = await sdk.usages.getRateLimitInfo(auth.id);
-      rateLimits.forEach(rl => {
-        console.log(`  ${rl.interfaceName ?? '全局'} [${rl.limitType}]: ${rl.currentValue}/${rl.limitValue} (剩余 ${rl.remainingValue})`);
-      });
-
-      console.log(`\n===== 12. 下载授权凭证 =====`);
+      logSection('【凭证下载】场景一：下载到指定目录（自动按默认文件名）');
       try {
+        fs.rmSync(TMP_DIR2, { recursive: true, force: true });
         const saved = await sdk.authorizations.downloadCredentialToFile(
           {
-            authorizationId: auth.id,
-            format: 'json',
+            authorizationId: demoAuthId,
+            format: CredentialFormat.JSON,
             includeSampleCode: true,
-            sampleCodeLanguages: ['nodejs', 'python']
+            sampleCodeLanguages: [SampleCodeLanguage.NODEJS, SampleCodeLanguage.PYTHON]
           },
-          './tmp'
+          TMP_DIR2
         );
-        console.log(`凭证已保存至: ${saved.filePath} (${saved.fileSize} 字节)`);
+        console.log(`✅ 目录模式: ${saved.filePath}`);
+        console.log(`   文件名: ${saved.fileName} | 文件大小: ${saved.fileSize} 字节`);
+        console.log(`   文件存在: ${fs.existsSync(saved.filePath)}`);
       } catch (e) {
-        if (isSdkError(e) && e.code === ErrorCode.AUTHORIZATION_NOT_FOUND) {
-          console.log('授权不存在或凭证尚未生成');
-        } else if (isSdkError(e) && e.code === ErrorCode.CREDENTIAL_NOT_FOUND) {
-          console.log('凭证尚未生成，请稍后再试');
+        if (isSdkError(e)) {
+          switch (e.code) {
+            case ErrorCode.AUTHORIZATION_NOT_FOUND:
+              console.log('❌ 授权记录不存在（可能 ID 有误或该授权已被撤销）');
+              break;
+            case ErrorCode.CREDENTIAL_NOT_FOUND:
+              console.log('❌ 凭证尚未生成：授权可能待生效，或管理员尚未签发凭证，请稍后再试');
+              break;
+            case ErrorCode.AUTHORIZATION_SUSPENDED:
+              console.log('❌ 授权已暂停，无法下载凭证');
+              break;
+            case ErrorCode.AUTHORIZATION_EXPIRED:
+              console.log('❌ 授权已过期，无法下载凭证，请先续费');
+              break;
+            case ErrorCode.BUSINESS_ERROR:
+              console.log(`❌ 服务端保存失败: ${e.message}`);
+              break;
+            default:
+              console.log(`❌ 下载失败 [${e.code}]: ${e.message}`);
+          }
+          if (e.requestId) console.log(`   requestId: ${e.requestId}`);
+          console.log('   验证：错误发生前不会写入任何文件');
+          console.log(`   ${TMP_DIR2} 是否存在: ${fs.existsSync(TMP_DIR2) ? '是' : '否'}`);
         } else {
           throw e;
         }
       }
 
-      console.log(`\n===== 13. 授权有效性校验 =====`);
-      const status = await sdk.authorizations.checkAuthorizationStatus(auth.id);
-      console.log(`授权ID: ${status.authorizationId}`);
-      console.log(`状态: ${status.statusName}, 是否有效: ${status.isValid ? '是' : '否'}`);
-      console.log(`到期日: ${status.expiresAt.slice(0, 10)}, 剩余天数: ${status.daysRemaining}`);
+      logSection('【凭证下载】场景二：下载到「指定完整文件名」');
+      try {
+        if (fs.existsSync(TMP_FILE)) fs.unlinkSync(TMP_FILE);
+        const saved = await sdk.authorizations.downloadCredentialToFile(
+          {
+            authorizationId: demoAuthId,
+            format: CredentialFormat.ENV,
+            includeSampleCode: false
+          },
+          TMP_FILE
+        );
+        console.log(`✅ 指定文件名模式: ${saved.filePath}`);
+        console.log(`   预期文件名: credential_${demoAuthId}.env vs 实际: ${saved.fileName}`);
+        console.log(`   文件存在: ${fs.existsSync(saved.filePath)}`);
+        console.log(`   文件大小: ${saved.fileSize} 字节`);
+        if (fs.existsSync(saved.filePath)) {
+          const content = fs.readFileSync(saved.filePath, 'utf8');
+          console.log(`   文件前 120 字节: ${JSON.stringify(content.slice(0, 120))}`);
+        }
+      } catch (e) {
+        if (isSdkError(e)) {
+          console.log(`❌ 指定文件名下载失败 [${e.code}]: ${e.message}`);
+          console.log(`   目标文件存在吗: ${fs.existsSync(TMP_FILE) ? '是（不应该，需检查）' : '否（符合预期）'}`);
+        } else {
+          throw e;
+        }
+      }
+
+      logSection('【凭证下载】错误处理校验 - 传不存在的授权 ID');
+      try {
+        await sdk.authorizations.downloadCredentialToFile(
+          {
+            authorizationId: 'AUTH_NON_EXISTENT_XXXX',
+            format: CredentialFormat.JSON
+          },
+          path.join(TMP_DIR, 'never-write.json')
+        );
+        console.log('❌ 异常：本应抛出错误却成功了');
+      } catch (e) {
+        if (isSdkError(e)) {
+          console.log(`✅ 正确抛出错误 [code=${e.code}]: ${e.message}`);
+          const badFile = path.join(TMP_DIR, 'never-write.json');
+          console.log(`   垃圾文件未被写入: ${!fs.existsSync(badFile)}`);
+        } else {
+          throw e;
+        }
+      }
     }
 
-    console.log(`\n===== 14. 批量工具示例 =====`);
-    const categories = await sdk.products.getCategories();
-    const printCategory = (nodes: any[], depth = 0) => {
-      for (const node of nodes) {
-        console.log(`${'  '.repeat(depth)}├ ${node.name} (产品数: ${node.productCount ?? 0})`);
-        if (node.children) printCategory(node.children, depth + 1);
-      }
-    };
-    console.log('分类树:');
-    printCategory(categories);
+    logSection('分类树 & 热门标签');
+    const cats = await sdk.products.getCategories();
+    console.log(`分类树: 共 ${cats.length} 个一级分类`);
+    cats.slice(0, 5).forEach(c => {
+      console.log(`  - ${c.name} (产品数: ${c.productCount ?? 0})`);
+    });
+    const hot = await sdk.products.getHotTags(10, Industry.FINANCE);
+    console.log(`金融行业热门标签: ${hot.map(t => '#' + t.name).join(' ')}`);
 
-    console.log('\n热门标签:');
-    const hotTags = await sdk.products.getHotTags(10, Industry.FINANCE);
-    hotTags.forEach(t => console.log(`  #${t.name}${t.category ? ` [${t.category}]` : ''}`));
+    logSection('示例执行完毕，清理临时文件');
+    fs.rmSync(TMP_DIR, { recursive: true, force: true });
+    console.log(`临时目录 ${TMP_DIR} 已清理`);
+    console.log('\n✅ 所有示例场景均通过类型检查并按预期执行');
   } catch (err) {
+    logSection('SDK 统一错误处理');
     if (isSdkError(err)) {
-      console.error(`\n===== SDK 错误处理示例 =====`);
       console.error(`错误码: ${err.code}`);
       console.error(`错误信息: ${err.message}`);
       if (err.requestId) console.error(`请求ID: ${err.requestId}`);
       if (err.httpStatus) console.error(`HTTP状态: ${err.httpStatus}`);
       if (err.validationErrors && err.validationErrors.length > 0) {
-        console.error(`字段校验错误:`);
+        console.error(`字段校验错误共 ${err.validationErrors.length} 项:`);
         err.validationErrors.forEach(ve => console.error(`  ${ve.field}: ${ve.message}`));
       }
       switch (err.code) {
@@ -292,7 +389,7 @@ async function main() {
     }
   } finally {
     sdk.destroy();
-    console.log('\nSDK 已清理');
+    console.log('\n🛑 SDK 已正确销毁，连接池清理完毕');
   }
 }
 

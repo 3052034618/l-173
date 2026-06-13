@@ -7,7 +7,9 @@
   "scripts": {
     "build": "tsc",
     "clean": "rimraf dist",
-    "example": "ts-node examples/usage.ts",
+    "example": "ts-node --project tsconfig.examples.json examples/usage.ts",
+    "example:check": "tsc --project tsconfig.examples.json --noEmit",
+    "typecheck": "tsc --noEmit",
     "prepublishOnly": "npm run clean && npm run build"
   },
   "keywords": [

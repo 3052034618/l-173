@@ -1,21 +1,45 @@
-export type OrderStatus =
-  | 'pending'
-  | 'reviewing'
-  | 'supplier_approval'
-  | 'approved'
-  | 'rejected'
-  | 'cancelled'
-  | 'expired';
+export enum OrderStatus {
+  PENDING = 'pending',
+  REVIEWING = 'reviewing',
+  SUPPLIER_APPROVAL = 'supplier_approval',
+  APPROVED = 'approved',
+  REJECTED = 'rejected',
+  CANCELLED = 'cancelled',
+  EXPIRED = 'expired'
+}
 
 export const OrderStatusMap: Record<OrderStatus, string> = {
-  pending: '待审核',
-  reviewing: '审核中',
-  supplier_approval: '供应商审批中',
-  approved: '已通过',
-  rejected: '已拒绝',
-  cancelled: '已取消',
-  expired: '已过期'
+  [OrderStatus.PENDING]: '待审核',
+  [OrderStatus.REVIEWING]: '审核中',
+  [OrderStatus.SUPPLIER_APPROVAL]: '供应商审批中',
+  [OrderStatus.APPROVED]: '已通过',
+  [OrderStatus.REJECTED]: '已拒绝',
+  [OrderStatus.CANCELLED]: '已取消',
+  [OrderStatus.EXPIRED]: '已过期'
 };
+
+export enum UrgencyLevel {
+  NORMAL = 'normal',
+  URGENT = 'urgent',
+  EMERGENCY = 'emergency'
+}
+
+export enum ScenarioType {
+  REPORT = 'report',
+  ANALYSIS = 'analysis',
+  MODEL_TRAINING = 'model_training',
+  BUSINESS_SYSTEM = 'business_system',
+  RISK_CONTROL = 'risk_control',
+  MARKETING = 'marketing',
+  OTHER = 'other'
+}
+
+export enum DataHandlingMethod {
+  API = 'api',
+  BULK_DOWNLOAD = 'bulk_download',
+  DASHBOARD = 'dashboard',
+  OTHER = 'other'
+}
 
 export interface OrderApplicant {
   userId: string;
@@ -29,13 +53,13 @@ export interface OrderApplicant {
 }
 
 export interface UsageScenario {
-  scenarioType: 'report' | 'analysis' | 'model_training' | 'business_system' | 'risk_control' | 'marketing' | 'other';
+  scenarioType: ScenarioType | string;
   scenarioName: string;
   description: string;
   systemName?: string;
   systemUrl?: string;
   expectedUsage?: string;
-  dataHandlingMethod?: 'api' | 'bulk_download' | 'dashboard' | 'other';
+  dataHandlingMethod?: DataHandlingMethod | string;
   storageLocation?: string;
   retentionPeriod?: number;
   internalProcessDocUrl?: string;
@@ -52,7 +76,7 @@ export interface CreateOrderRequest {
   relatedProjects?: string[];
   attachFiles?: OrderAttachment[];
   remarks?: string;
-  urgencyLevel?: 'normal' | 'urgent' | 'emergency';
+  urgencyLevel?: UrgencyLevel | string;
   expectedStartDate?: string;
   expectedEndDate?: string;
 }
@@ -75,7 +99,7 @@ export interface OrderDetail {
   quantity: number;
   totalAmount: number;
   currency: string;
-  status: OrderStatus;
+  status: OrderStatus | string;
   statusName: string;
   applicant: OrderApplicant;
   usageScenarios: UsageScenario[];
@@ -114,12 +138,12 @@ export interface ApprovalNode {
 }
 
 export interface OrderFilterParams {
-  status?: OrderStatus | OrderStatus[];
+  status?: OrderStatus | OrderStatus[] | string | string[];
   keyword?: string;
   productId?: string;
   startDate?: string;
   endDate?: string;
-  urgencyLevel?: string;
+  urgencyLevel?: UrgencyLevel | string;
 }
 
 export interface CancelOrderRequest {
@@ -133,5 +157,45 @@ export interface OrderActionResult {
   orderId: string;
   success: boolean;
   message: string;
-  newStatus?: OrderStatus;
+  newStatus?: OrderStatus | string;
+}
+
+export interface SubmitOrderFormData {
+  productId: string;
+  pricePlanId: string;
+  quantity?: number;
+  applicant: {
+    userId: string;
+    userName: string;
+    department: string;
+    phone?: string;
+    email?: string;
+    companyName?: string;
+    unifiedSocialCreditCode?: string;
+    businessLicenseUrl?: string;
+  };
+  scenarios: Array<{
+    scenarioType: ScenarioType | string;
+    scenarioName: string;
+    description: string;
+    systemName?: string;
+    systemUrl?: string;
+    expectedUsage?: string;
+    dataHandlingMethod?: DataHandlingMethod | string;
+    storageLocation?: string;
+    retentionPeriod?: number;
+  }>;
+  dataPurpose: string;
+  isInternalUse: boolean;
+  relatedProjects?: string[];
+  remarks?: string;
+  urgencyLevel?: UrgencyLevel | string;
+  expectedStartDate?: string;
+  expectedEndDate?: string;
+  attachments?: Array<{
+    fileName: string;
+    fileUrl: string;
+    fileSize?: number;
+    fileType?: string;
+  }>;
 }

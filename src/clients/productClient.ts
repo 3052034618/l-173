@@ -1,4 +1,5 @@
 import { HttpClient } from '../core/httpClient';
+import { createError, ErrorCode } from '../core/errors';
 import {
   ProductSummary,
   ProductDetail,
@@ -7,11 +8,55 @@ import {
   PageRequest,
   CategoryTreeNode,
   ProductTag,
-  ProductInterface
+  ProductInterface,
+  Industry,
+  IndustryMap,
+  ProductStatus,
+  ProductStatusMap,
+  PriceUnit
 } from '../types';
+
+export interface ProductSearchForm {
+  keyword?: string;
+  industry?: Industry | string;
+  tags?: string | string[];
+  tagLogic?: 'and' | 'or';
+  categoryId?: string;
+  providerId?: string;
+  minPrice?: number;
+  maxPrice?: number;
+  status?: ProductStatus | string;
+  pageNum?: number;
+  pageSize?: number;
+  sortBy?: 'orderCount' | 'minPrice' | 'rating' | 'publishedAt' | 'viewCount' | string;
+  sortOrder?: 'asc' | 'desc';
+}
 
 export class ProductClient {
   constructor(private readonly http: HttpClient) {}
+
+  public async searchFromPageForm(
+    form: ProductSearchForm = {}
+  ): Promise<PaginationResult<ProductSummary>> {
+    const filter: ProductFilterParams = {
+      keyword: form.keyword,
+      industry: form.industry,
+      tags: typeof form.tags === 'string' ? form.tags.split(/[,，\s]+/).filter(Boolean) : form.tags,
+      tagLogic: form.tagLogic || 'or',
+      categoryId: form.categoryId,
+      providerId: form.providerId,
+      status: form.status
+    };
+    if (form.minPrice !== undefined || form.maxPrice !== undefined) {
+      filter.priceRange = { min: form.minPrice, max: form.maxPrice };
+    }
+    return this.searchProducts(filter, {
+      pageNum: form.pageNum || 1,
+      pageSize: form.pageSize || 20,
+      field: form.sortBy || 'orderCount',
+      order: form.sortOrder || 'desc'
+    });
+  }
 
   public async searchProducts(
     filter: ProductFilterParams = {},
@@ -32,7 +77,7 @@ export class ProductClient {
 
   public async getProductDetail(productId: string): Promise<ProductDetail> {
     if (!productId) {
-      throw new Error('productId 不能为空');
+      throw createError(ErrorCode.PARAM_MISSING, 'productId 不能为空');
     }
     const resp = await this.http.get<ProductDetail>(`/api/v1/products/${encodeURIComponent(productId)}`);
     return this.enrichDetail(resp.data);
@@ -43,7 +88,7 @@ export class ProductClient {
       return [];
     }
     if (productIds.length > 50) {
-      throw new Error('单次批量查询不能超过 50 个产品');
+      throw createError(ErrorCode.PARAM_INVALID, '单次批量查询不能超过 50 个产品');
     }
     const resp = await this.http.post<ProductDetail[]>('/api/v1/products/batch', { productIds });
     return resp.data.map(item => this.enrichDetail(item));
@@ -54,7 +99,7 @@ export class ProductClient {
     return resp.data;
   }
 
-  public async getHotTags(limit: number = 20, industry?: string): Promise<ProductTag[]> {
+  public async getHotTags(limit: number = 20, industry?: Industry | string): Promise<ProductTag[]> {
     const params: Record<string, unknown> = { limit };
     if (industry) params.industry = industry;
     const resp = await this.http.get<ProductTag[]>('/api/v1/products/tags/hot', params);
@@ -62,7 +107,7 @@ export class ProductClient {
   }
 
   public async getSimilarProducts(productId: string, limit: number = 10): Promise<ProductSummary[]> {
-    if (!productId) throw new Error('productId 不能为空');
+    if (!productId) throw createError(ErrorCode.PARAM_MISSING, 'productId 不能为空');
     const resp = await this.http.get<ProductSummary[]>(
       `/api/v1/products/${encodeURIComponent(productId)}/similar`,
       { limit }
@@ -70,7 +115,7 @@ export class ProductClient {
     return resp.data.map(item => this.enrichSummary(item));
   }
 
-  public async getRecommendedProducts(limit: number = 10, industry?: string): Promise<ProductSummary[]> {
+  public async getRecommendedProducts(limit: number = 10, industry?: Industry | string): Promise<ProductSummary[]> {
     const params: Record<string, unknown> = { limit };
     if (industry) params.industry = industry;
     const resp = await this.http.get<ProductSummary[]>('/api/v1/products/recommended', params);
@@ -78,7 +123,7 @@ export class ProductClient {
   }
 
   public async getProductInterfaces(productId: string): Promise<ProductInterface[]> {
-    if (!productId) throw new Error('productId 不能为空');
+    if (!productId) throw createError(ErrorCode.PARAM_MISSING, 'productId 不能为空');
     const resp = await this.http.get<ProductInterface[]>(
       `/api/v1/products/${encodeURIComponent(productId)}/interfaces`
     );
@@ -86,33 +131,23 @@ export class ProductClient {
   }
 
   private enrichSummary(summary: ProductSummary): ProductSummary {
-    const { IndustryMap, PriceUnitMap } = require('../types/product');
+    const industryKey = typeof summary.industry === 'string' ? summary.industry : summary.industry as unknown as string;
+    const statusKey = typeof summary.status === 'string' ? summary.status : summary.status as unknown as string;
     return {
       ...summary,
-      industryName: summary.industryName || (IndustryMap as Record<string, string>)[summary.industry],
-      statusName: summary.statusName || this.mapStatusName(summary.status)
+      industryName: summary.industryName || IndustryMap[industryKey as Industry] || industryKey,
+      statusName: summary.statusName || ProductStatusMap[statusKey as ProductStatus] || statusKey
     };
   }
 
   private enrichDetail(detail: ProductDetail): ProductDetail {
     const enriched = this.enrichSummary(detail) as ProductDetail;
     if (enriched.pricePlans && enriched.pricePlans.length > 0) {
-      const { PriceUnitMap } = require('../types/product');
       enriched.pricePlans = enriched.pricePlans.map(plan => ({
         ...plan,
-        unit: plan.unit
+        unit: plan.unit as unknown as PriceUnit
       }));
     }
     return enriched;
-  }
-
-  private mapStatusName(status: string): string {
-    const map: Record<string, string> = {
-      published: '已发布',
-      offline: '已下线',
-      draft: '草稿',
-      audit: '审核中'
-    };
-    return map[status] || status;
   }
 }

@@ -1,34 +1,67 @@
-export type Industry =
-  | 'finance'
-  | 'healthcare'
-  | 'education'
-  | 'transportation'
-  | 'energy'
-  | 'retail'
-  | 'manufacturing'
-  | 'government'
-  | 'media'
-  | 'telecom'
-  | 'agriculture'
-  | 'realestate'
-  | 'logistics'
-  | 'other';
+export enum Industry {
+  FINANCE = 'finance',
+  HEALTHCARE = 'healthcare',
+  EDUCATION = 'education',
+  TRANSPORTATION = 'transportation',
+  ENERGY = 'energy',
+  RETAIL = 'retail',
+  MANUFACTURING = 'manufacturing',
+  GOVERNMENT = 'government',
+  MEDIA = 'media',
+  TELECOM = 'telecom',
+  AGRICULTURE = 'agriculture',
+  REALESTATE = 'realestate',
+  LOGISTICS = 'logistics',
+  OTHER = 'other'
+}
 
 export const IndustryMap: Record<Industry, string> = {
-  finance: '金融',
-  healthcare: '医疗健康',
-  education: '教育',
-  transportation: '交通出行',
-  energy: '能源',
-  retail: '零售消费',
-  manufacturing: '制造业',
-  government: '政务',
-  media: '文化传媒',
-  telecom: '通信',
-  agriculture: '农业',
-  realestate: '房地产',
-  logistics: '物流',
-  other: '其他'
+  [Industry.FINANCE]: '金融',
+  [Industry.HEALTHCARE]: '医疗健康',
+  [Industry.EDUCATION]: '教育',
+  [Industry.TRANSPORTATION]: '交通出行',
+  [Industry.ENERGY]: '能源',
+  [Industry.RETAIL]: '零售消费',
+  [Industry.MANUFACTURING]: '制造业',
+  [Industry.GOVERNMENT]: '政务',
+  [Industry.MEDIA]: '文化传媒',
+  [Industry.TELECOM]: '通信',
+  [Industry.AGRICULTURE]: '农业',
+  [Industry.REALESTATE]: '房地产',
+  [Industry.LOGISTICS]: '物流',
+  [Industry.OTHER]: '其他'
+};
+
+export enum ProductStatus {
+  PUBLISHED = 'published',
+  OFFLINE = 'offline',
+  DRAFT = 'draft',
+  AUDIT = 'audit'
+}
+
+export const ProductStatusMap: Record<ProductStatus, string> = {
+  [ProductStatus.PUBLISHED]: '已发布',
+  [ProductStatus.OFFLINE]: '已下线',
+  [ProductStatus.DRAFT]: '草稿',
+  [ProductStatus.AUDIT]: '审核中'
+};
+
+export enum PriceUnit {
+  TIMES = 'times',
+  MONTH = 'month',
+  YEAR = 'year',
+  DATASET = 'dataset',
+  ROWS = 'rows',
+  GB = 'gb'
+}
+
+export const PriceUnitMap: Record<PriceUnit, string> = {
+  [PriceUnit.TIMES]: '次',
+  [PriceUnit.MONTH]: '月',
+  [PriceUnit.YEAR]: '年',
+  [PriceUnit.DATASET]: '数据集',
+  [PriceUnit.ROWS]: '万条',
+  [PriceUnit.GB]: 'GB'
 };
 
 export interface ProductTag {
@@ -39,7 +72,7 @@ export interface ProductTag {
 
 export interface ProductFilterParams {
   keyword?: string;
-  industry?: Industry;
+  industry?: Industry | string;
   tags?: string[];
   tagLogic?: 'and' | 'or';
   categoryId?: string;
@@ -48,27 +81,14 @@ export interface ProductFilterParams {
     min?: number;
     max?: number;
   };
-  status?: ProductStatus;
+  status?: ProductStatus | string;
 }
-
-export type ProductStatus = 'published' | 'offline' | 'draft' | 'audit';
-
-export type PriceUnit = 'times' | 'month' | 'year' | 'dataset' | 'rows' | 'gb';
-
-export const PriceUnitMap: Record<PriceUnit, string> = {
-  times: '次',
-  month: '月',
-  year: '年',
-  dataset: '数据集',
-  rows: '万条',
-  gb: 'GB'
-};
 
 export interface PricePlan {
   id: string;
   name: string;
   price: number;
-  unit: PriceUnit;
+  unit: PriceUnit | string;
   quota: number;
   description?: string;
   features?: string[];
@@ -79,7 +99,7 @@ export interface ProductSummary {
   name: string;
   shortName?: string;
   description: string;
-  industry: Industry;
+  industry: Industry | string;
   industryName?: string;
   tags: ProductTag[];
   categoryId?: string;
@@ -88,10 +108,10 @@ export interface ProductSummary {
   providerName: string;
   thumbnailUrl?: string;
   coverUrl?: string;
-  status: ProductStatus;
+  status: ProductStatus | string;
   statusName?: string;
   minPrice: number;
-  priceUnit: PriceUnit;
+  priceUnit: PriceUnit | string;
   rating?: number;
   orderCount: number;
   viewCount: number;
