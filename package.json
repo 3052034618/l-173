@@ -1,0 +1,30 @@
+{
+  "name": "data-element-circulation-sdk",
+  "version": "1.0.0",
+  "description": "数据要素流通平台 SDK - 提供数据产品查询、订购、授权、用量查询、凭证下载等能力",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "clean": "rimraf dist",
+    "example": "ts-node examples/usage.ts",
+    "prepublishOnly": "npm run clean && npm run build"
+  },
+  "keywords": [
+    "data-element",
+    "data-circulation",
+    "sdk",
+    "data-product"
+  ],
+  "author": "",
+  "license": "MIT",
+  "devDependencies": {
+    "@types/node": "^20.10.0",
+    "rimraf": "^5.0.5",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.3.3"
+  },
+  "engines": {
+    "node": ">=16.0.0"
+  }
+}
